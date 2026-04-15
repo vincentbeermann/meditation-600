@@ -2,7 +2,7 @@
 // navigation so updates reach installed devices. Bump CACHE_VERSION after
 // editing shell files.
 
-const CACHE_VERSION = 'meditation-600-v1';
+const CACHE_VERSION = 'meditation-600-20260415-223625';
 const APP_SHELL = [
   './',
   'index.html',
