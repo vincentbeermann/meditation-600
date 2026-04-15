@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Editor / OS
+*~
+*.swp
+*.swo
+
+# Claude Code runtime
+.claude/
+
+# Node (if any tooling ever lands here)
+node_modules/
+
+# Local state / backups
+*.bak
+*.tmp
