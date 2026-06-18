@@ -116,10 +116,61 @@ window.DashboardModule = (function () {
       out.push(variantCard);
     }
 
+    // ----- Reminders (push) -----
+    out.push(buildRemindersCard());
+
     // ----- Data management -----
     out.push(buildDataCard());
 
     return out;
+  }
+
+  function buildRemindersCard() {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const R = window.Reminders;
+    const supported = R && R.supported;
+    const perm = R ? R.permission() : 'unsupported';
+
+    let statusLine;
+    if (!supported) {
+      statusLine = perm === 'unsupported'
+        ? 'Not available in this browser.'
+        : 'Not available here (works on the deployed app, not local dev).';
+    } else if (perm === 'granted') {
+      statusLine = 'Reminders are on. ✓';
+    } else if (perm === 'denied') {
+      statusLine = 'Blocked in browser settings. Allow notifications to enable.';
+    } else {
+      statusLine = 'Get a gentle daily nudge to sit.';
+    }
+
+    card.innerHTML = `
+      <h3>Reminders</h3>
+      <p class="muted" style="font-size:13px;">${statusLine}</p>
+      <div class="data-actions">
+        <button id="enable-reminders" class="secondary"${(!supported || perm === 'granted' || perm === 'denied') ? ' disabled' : ''}>Enable reminders</button>
+      </div>
+    `;
+
+    const btn = card.querySelector('#enable-reminders');
+    if (btn && supported && perm !== 'denied') {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Enabling…';
+        const res = await window.Reminders.enable();
+        if (res && res.ok) {
+          if (window.showToast) window.showToast('Reminders enabled');
+        } else if (res && res.reason === 'permission') {
+          if (window.showToast) window.showToast('Permission ' + res.permission);
+        } else {
+          if (window.showToast) window.showToast('Could not enable reminders');
+        }
+        // re-render the dashboard to reflect new state
+        if (window.bootApp) window.bootApp();
+      });
+    }
+    return card;
   }
 
   function buildRing(stats) {
@@ -225,7 +276,7 @@ window.DashboardModule = (function () {
     card.className = 'card';
     card.innerHTML = `
       <h3>Data</h3>
-      <p class="muted" style="font-size:13px;">Everything lives on this device. Export occasionally.</p>
+      <p class="muted" style="font-size:13px;">Synced to your account across devices. Export anytime for a backup.</p>
       <div class="data-actions">
         <button id="export-data" class="secondary">Export</button>
         <button id="import-data" class="secondary">Import</button>

@@ -15,3 +15,11 @@ node_modules/
 # Local state / backups
 *.bak
 *.tmp
+
+# Firebase CLI artefacts (never commit credentials or local caches)
+.firebase/
+*-debug.log
+firebase-debug.log
+firestore-debug.log
+*serviceAccount*.json
+*adminsdk*.json

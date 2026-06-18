@@ -56,8 +56,17 @@ function currentRoute() {
   return (window.location.hash || `#${DEFAULT_ROUTE}`).slice(1);
 }
 
-window.addEventListener('hashchange', () => navigate(currentRoute()));
-window.addEventListener('DOMContentLoaded', () => navigate(currentRoute()));
+window.addEventListener('hashchange', () => {
+  if (window.__booted) navigate(currentRoute());
+});
+
+// Boot is gated on authentication: firebase-init.js calls window.bootApp()
+// once a user is signed in (and after the one-time localStorage migration).
+// Until then the login overlay covers the app and nothing is rendered.
+window.bootApp = function () {
+  window.__booted = true;
+  navigate(currentRoute());
+};
 
 // Lightweight toast for save confirmations
 window.showToast = function (msg) {

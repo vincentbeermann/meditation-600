@@ -1,0 +1,24 @@
+name: Daily meditation reminder
+
+on:
+  schedule:
+    # GitHub cron is UTC. 06:00 UTC ≈ 08:00 CEST (07:00 CET in winter),
+    # 18:00 UTC ≈ 20:00 CEST (19:00 CET in winter).
+    - cron: '0 6 * * *'
+    - cron: '0 18 * * *'
+  workflow_dispatch: {} # allows manual "Run workflow" for testing
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install firebase-admin
+        run: npm install firebase-admin@^12
+      - name: Send reminders
+        env:
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+        run: node scripts/send-reminders.mjs
