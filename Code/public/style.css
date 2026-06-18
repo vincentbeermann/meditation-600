@@ -133,10 +133,22 @@ main {
   max-width: 640px;
   margin: 0 auto;
   min-height: calc(100vh - var(--header-h) - var(--tabbar-h));
+  display: flex;
+  flex-direction: column;
 }
 
 .view {
   animation: fadeIn 0.22s ease-out;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Short, single-focus screens (Sit, Log) fill the viewport and center their
+   content vertically instead of clinging to the top with empty space below. */
+.view-center {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 @keyframes fadeIn {
@@ -738,4 +750,65 @@ main {
   min-width: 90px;
   font-size: 13px;
   padding: 10px 12px;
+}
+
+/* ---- Auth: sign-out button in header + login overlay -------------------- */
+
+#btn-signout {
+  margin-left: auto;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  font-size: 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+#auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+#auth-overlay .auth-card {
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 32px 24px;
+}
+
+#auth-overlay .auth-logo {
+  font-size: 48px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+#auth-overlay h2 {
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+#auth-overlay p {
+  color: var(--text-dim);
+  font-size: 15px;
+  margin: 0 0 20px;
+}
+
+#auth-overlay #btn-login {
+  width: 100%;
+}
+
+#auth-overlay .auth-who {
+  margin: 16px 0 0;
+  font-size: 13px;
+  min-height: 1em;
 }

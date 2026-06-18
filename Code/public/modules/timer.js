@@ -24,7 +24,7 @@ window.TimerModule = (function () {
 
   function render() {
     const root = document.createElement('div');
-    root.className = 'view';
+    root.className = 'view view-center';
     if (phase === 'setup')  root.appendChild(renderSetup());
     if (phase === 'active') root.appendChild(renderActive());
     if (phase === 'done')   root.appendChild(renderDone());
@@ -240,7 +240,8 @@ window.TimerModule = (function () {
       pausedAccumMs: 0,
       lastSecond: -1,
     };
-    beep(528, 250); // start bell
+    beep(528, 250); // start bell (also unlocks the audio context via ensureAudio)
+    requestWakeLock(); // keep the screen awake so the end bell fires on time
     rerender();
     tickLoop();
   }
@@ -341,11 +342,13 @@ window.TimerModule = (function () {
       state.pausedAccumMs += Date.now() - state.pauseStartMs;
       state.pauseStartMs = null;
       state.paused = false;
+      requestWakeLock();
       tickLoop();
     } else {
       state.paused = true;
       state.pauseStartMs = Date.now();
       cancelAnimationFrame(state.rafId);
+      releaseWakeLock();
     }
     // rebuild only the controls to flip label
     const view = document.getElementById('view');
@@ -355,6 +358,7 @@ window.TimerModule = (function () {
   function endSit() {
     if (!state) return;
     cancelAnimationFrame(state.rafId);
+    releaseWakeLock();
     // closing bell
     beep(528, 350);
     const totalMin = Math.max(1, Math.round(elapsedS() / 60));
@@ -398,9 +402,21 @@ window.TimerModule = (function () {
 
   // Web Audio bell. Kept inline so the PWA has no audio assets.
   let audioCtx = null;
-  function beep(freq = 528, durationMs = 250) {
+
+  // Create and (re)resume the audio context. MUST be called from within a user
+  // gesture (the Begin tap) — otherwise iOS/Safari leaves the context
+  // 'suspended' and every bell is silent for the whole session.
+  function ensureAudio() {
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume();
+    } catch (e) { /* AudioContext unsupported / blocked */ }
+  }
+
+  function beep(freq = 528, durationMs = 250) {
+    try {
+      ensureAudio();
+      if (!audioCtx) return;
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.frequency.value = freq;
@@ -418,8 +434,47 @@ window.TimerModule = (function () {
     }
   }
 
+  // ------------------- screen wake lock + background resync -------------------
+  //
+  // Web apps cannot reliably fire audio/timers while the screen is asleep, so we
+  // hold a Screen Wake Lock for the duration of a sit: the display stays on, the
+  // countdown runs, and the end bell rings exactly on time. If the user manually
+  // locks the phone anyway, the lock is dropped and JS is frozen — so on return
+  // (visibilitychange) we re-acquire the lock and, if the countdown already
+  // elapsed while we were away, end it immediately (ringing the closing bell).
+  let wakeLock = null;
+
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible' && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (e) { /* unsupported or denied — degrade gracefully */ }
+  }
+
+  function releaseWakeLock() {
+    try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {}
+  }
+
+  function onVisibility() {
+    if (document.visibilityState !== 'visible') return;
+    if (!state || phase !== 'active' || state.paused) return;
+    // Countdown finished while we were hidden → close it now (rings the bell).
+    if (state.durationS > 0 && elapsedS() >= state.durationS) {
+      endSit();
+      return;
+    }
+    // Otherwise resume: re-acquire the lock, refresh the display, restart the loop.
+    requestWakeLock();
+    updateDisplay();
+    if (!state.rafId) tickLoop();
+  }
+  document.addEventListener('visibilitychange', onVisibility);
+
   function reset() {
     if (state && state.rafId) cancelAnimationFrame(state.rafId);
+    releaseWakeLock();
     state = null;
     if (phase === 'active') {
       phase = 'setup';

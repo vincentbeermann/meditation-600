@@ -21,7 +21,7 @@ window.LogModule = (function () {
     ratingFocus = null;
 
     const root = document.createElement('div');
-    root.className = 'view';
+    root.className = 'view view-center';
 
     const pending = window.PENDING_LOG;
 
