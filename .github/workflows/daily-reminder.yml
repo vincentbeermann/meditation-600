@@ -2,10 +2,11 @@ name: Daily meditation reminder
 
 on:
   schedule:
-    # GitHub cron is UTC. 06:00 UTC ≈ 08:00 CEST (07:00 CET in winter),
-    # 18:00 UTC ≈ 20:00 CEST (19:00 CET in winter).
-    - cron: '0 6 * * *'
-    - cron: '0 18 * * *'
+    # GitHub cron is UTC. 06:05 UTC ≈ 08:05 CEST, 18:05 UTC ≈ 20:05 CEST.
+    # Odd minute (not :00) dodges GitHub's congested top-of-hour queue; the
+    # script then adds a 0–12 min random jitter so it's not robotic and doesn't
+    # pile up with the sport app (which is staggered to :25).
+    - cron: '5 6,18 * * *'
   workflow_dispatch: {} # allows manual "Run workflow" for testing
 
 jobs:

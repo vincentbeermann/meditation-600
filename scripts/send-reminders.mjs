@@ -117,6 +117,15 @@ async function main() {
   const db = admin.firestore();
   const messaging = admin.messaging();
 
+  // Random jitter (0–12 min) on SCHEDULED runs only: varies the exact send time
+  // day to day and keeps clear of the sport app's slot, so reminders never
+  // arrive in a robotic pile. Manual (workflow_dispatch) runs stay instant.
+  if (process.env.GITHUB_EVENT_NAME === 'schedule') {
+    const jitterMs = Math.floor(Math.random() * 12 * 60000);
+    console.log(`[reminders] jitter ${Math.round(jitterMs / 60000)} min`);
+    await new Promise((r) => setTimeout(r, jitterMs));
+  }
+
   // Slot from the run time: morning if UTC hour < 12, else evening.
   const slot = new Date().getUTCHours() < 12 ? 'morning' : 'evening';
   console.log(`[reminders] slot=${slot} utc=${new Date().toISOString()}`);
