@@ -45,18 +45,49 @@ function summarize(sessions) {
     streak++;
     cur.setDate(cur.getDate() - 7);
   }
-  return { totalHours, satToday, daysSince, streak, count: sessions.length };
+  const thisWeek = isoWeekKey(today);
+  const weekCount = sessions.filter((s) => isoWeekKey(s.date) === thisWeek).length;
+  return { totalHours, satToday, daysSince, streak, count: sessions.length, weekCount };
+}
+
+// The slot planned for today (Mon=0..Sun=6), earliest first, or null.
+function plannedToday(plan) {
+  if (!plan || !Array.isArray(plan.items)) return null;
+  const wd = (new Date(todayISO()).getDay() + 6) % 7;
+  const items = plan.items.filter((i) => i.day === wd);
+  if (!items.length) return null;
+  items.sort((a, b) => String(a.time).localeCompare(String(b.time)));
+  return items[0];
 }
 
 // Returns { title, body } or null to skip this user for this slot.
-function craftMessage(stats, slot) {
+// Data-aware: reads the weekly plan + history. Tone stays feedback/insight, not
+// gamified pressure (Vincent's design rule).
+function craftMessage(stats, slot, plan) {
   if (stats.satToday) return null; // already practiced today — don't nag
 
   const remaining = Math.max(0, Math.ceil(GOAL_HOURS - stats.totalHours));
+  const today = plannedToday(plan);
+  const target = plan && plan.target ? plan.target : null;
+  const wc = stats.weekCount;
+  const left = target ? Math.max(0, target - wc) : null;
+
+  // never miss twice — exactly one day since last (gentle re-entry, no shaming).
+  if (stats.daysSince === 1) {
+    const t = slot === 'morning' ? '🧘 Guten Morgen' : '🌙 Bevor der Tag endet';
+    return { title: t, body: 'Gestern Pause — heute wieder rein, damit es kein Muster wird.' };
+  }
 
   if (slot === 'morning') {
     if (stats.count === 0) {
       return { title: '🧘 Guten Morgen', body: 'Beginne deine Reise — die erste Sitzung wartet.' };
+    }
+    if (today) {
+      const goal = target ? ` · ${wc}/${target} diese Woche` : '';
+      return { title: '🧘 Guten Morgen', body: `Heute ${today.time} eingeplant, ${today.duration || 20} min${goal}.` };
+    }
+    if (left != null && left > 0) {
+      return { title: '🧘 Guten Morgen', body: `${wc}/${target} diese Woche — eine Sitzung bringt dich auf Kurs.` };
     }
     if (stats.daysSince != null && stats.daysSince >= 3) {
       return { title: '🧘 Guten Morgen', body: `${stats.daysSince} Tage Pause — heute wieder kurz sitzen?` };
@@ -65,8 +96,14 @@ function craftMessage(stats, slot) {
   }
 
   // evening
+  if (today) {
+    return { title: '🌙 Bevor der Tag endet', body: `${today.time} war geplant — eine kurze Sitzung geht noch.` };
+  }
+  if (left != null && left > 0) {
+    return { title: '🌙 Bevor der Tag endet', body: `Noch ${left} bis zum Wochenziel — kurz sitzen?` };
+  }
   if (stats.streak > 0) {
-    return { title: '🌙 Bevor der Tag endet', body: `Heute noch nicht gesessen — ${stats.streak}-Wochen-Streak halten?` };
+    return { title: '🌙 Bevor der Tag endet', body: `Heute noch nicht gesessen — ${stats.streak}-Wochen-Serie halten?` };
   }
   return { title: '🌙 Bevor der Tag endet', body: 'Kurz innehalten vor dem Schlaf?' };
 }
@@ -100,7 +137,9 @@ async function main() {
     const sessSnap = await db.collection('users').doc(uid).collection('sessions').get();
     const sessions = sessSnap.docs.map((d) => d.data());
     const stats = summarize(sessions);
-    const msg = craftMessage(stats, slot);
+    const planSnap = await db.collection('users').doc(uid).collection('meta').doc('plan').get();
+    const plan = planSnap.exists ? planSnap.data() : null;
+    const msg = craftMessage(stats, slot, plan);
     if (!msg) { skipped++; continue; }
 
     for (const ref of tokenRefs) {
