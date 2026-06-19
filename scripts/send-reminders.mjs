@@ -106,12 +106,16 @@ async function main() {
     for (const ref of tokenRefs) {
       const token = ref.id;
       try {
+        // Data-only: the service worker's onBackgroundMessage renders exactly
+        // one notification. A `notification` block would make FCM auto-display
+        // it AND fire onBackgroundMessage → two notifications for one reminder.
         await messaging.send({
           token,
-          notification: { title: msg.title, body: msg.body },
-          webpush: {
-            notification: { title: msg.title, body: msg.body, icon: ICON, badge: ICON, tag: '600-reminder' },
-            fcmOptions: { link: `${APP_URL}/#timer` },
+          data: {
+            title: msg.title,
+            body: msg.body,
+            tag: '600-reminder',
+            url: `${APP_URL}/#timer`,
           },
         });
         sent++;
