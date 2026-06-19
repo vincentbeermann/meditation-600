@@ -54,6 +54,10 @@
   function setOverlay(showLogin, user) {
     var overlay = document.getElementById('auth-overlay');
     if (overlay) overlay.style.display = showLogin ? 'flex' : 'none';
+    if (showLogin) {
+      var login = document.getElementById('btn-login');
+      if (login) try { login.focus(); } catch (e) {}
+    }
     var who = document.getElementById('auth-who');
     if (who) who.textContent = user ? (user.displayName || user.email || '') : '';
     var signout = document.getElementById('btn-signout');
@@ -97,5 +101,24 @@
     document.addEventListener('DOMContentLoaded', wireButtons);
   } else {
     wireButtons();
+  }
+
+  // Offline indicator: a small pill that appears only when the device is
+  // offline, reassuring that changes are queued and will sync on reconnect
+  // (Firestore offline persistence handles the actual queue).
+  function setupOfflineIndicator() {
+    var pill = document.createElement('div');
+    pill.id = 'offline-pill';
+    pill.textContent = '● Offline';
+    function update() { pill.style.display = navigator.onLine ? 'none' : 'flex'; }
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    document.body.appendChild(pill);
+    update();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupOfflineIndicator);
+  } else {
+    setupOfflineIndicator();
   }
 })();

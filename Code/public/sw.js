@@ -3,7 +3,7 @@
 // next launch without a manual cache bump. Precache uses {cache:'reload'} so a
 // new version never caches a stale (max-age) copy.
 
-const CACHE_VERSION = 'meditation-600-firebase-v5';
+const CACHE_VERSION = 'meditation-600-firebase-v19';
 const APP_SHELL = [
   './',
   'index.html',
@@ -12,6 +12,7 @@ const APP_SHELL = [
   'storage.js',
   'firebase-config.js',
   'firebase-init.js',
+  'settings.js',
   'messaging.js',
   'vendor/firebase-app-compat.js',
   'vendor/firebase-auth-compat.js',
@@ -21,6 +22,7 @@ const APP_SHELL = [
   'modules/log.js',
   'modules/history.js',
   'modules/dashboard.js',
+  'modules/plan.js',
   'manifest.webmanifest',
 ];
 
