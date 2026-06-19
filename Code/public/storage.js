@@ -35,6 +35,12 @@
     return window.fb.db.collection('users').doc(uid).collection('sessions');
   }
 
+  function planDoc() {
+    var uid = window.fb && window.fb.uid;
+    if (!uid) throw new Error('not authenticated');
+    return window.fb.db.collection('users').doc(uid).collection('meta').doc('plan');
+  }
+
   async function loadSessions() {
     var snap = await sessionsCol().get();
     return snap.docs.map(function (d) {
@@ -64,11 +70,20 @@
 
     var variants = {};
     for (var i = 0; i < sessions.length; i++) {
-      var v = sessions[i].variant || 'silent';
-      if (!variants[v]) variants[v] = { minutes: 0, count: 0 };
-      variants[v].minutes += sessions[i].duration_min || 0;
+      var sv = sessions[i];
+      var v = sv.variant || 'silent';
+      if (!variants[v]) variants[v] = { minutes: 0, count: 0, _calmSum: 0, _calmN: 0, _focusSum: 0, _focusN: 0 };
+      variants[v].minutes += sv.duration_min || 0;
       variants[v].count += 1;
+      if (sv.rating_calm) { variants[v]._calmSum += sv.rating_calm; variants[v]._calmN += 1; }
+      if (sv.rating_focus) { variants[v]._focusSum += sv.rating_focus; variants[v]._focusN += 1; }
     }
+    // Average calm/focus per style (null when never rated).
+    Object.keys(variants).forEach(function (k) {
+      var d = variants[k];
+      d.avgCalm = d._calmN ? d._calmSum / d._calmN : null;
+      d.avgFocus = d._focusN ? d._focusSum / d._focusN : null;
+    });
 
     var today = new Date(todayISO());
     var dayMap = {};
@@ -97,6 +112,31 @@
       }
     }
 
+    // Sessions in the current ISO week (for the weekly-goal progress).
+    var currentWeekKey = isoWeekKey(todayISO());
+    var weekCount = sessions.filter(function (s) { return isoWeekKey(s.date) === currentWeekKey; }).length;
+
+    // Overall calm/focus (reflection insight). null until rated often enough.
+    var calmVals = sessions.map(function (s) { return s.rating_calm; }).filter(function (v) { return v; });
+    var focusVals = sessions.map(function (s) { return s.rating_focus; }).filter(function (v) { return v; });
+    var avgCalm = calmVals.length ? calmVals.reduce(function (a, b) { return a + b; }, 0) / calmVals.length : null;
+    var avgFocus = focusVals.length ? focusVals.reduce(function (a, b) { return a + b; }, 0) / focusVals.length : null;
+    var ratedCount = calmVals.length;
+
+    // Longest run of consecutive active weeks ever (insight, not a trophy).
+    var longestStreak = 0;
+    var sortedDates = sessions.map(function (s) { return s.date; }).filter(Boolean).sort();
+    if (sortedDates.length) {
+      var run = 0;
+      var walk = new Date(sortedDates[0]);
+      while (walk <= today) {
+        if (weekSet.has(isoWeekKey(walk.toISOString().slice(0, 10)))) {
+          run++; if (run > longestStreak) longestStreak = run;
+        } else { run = 0; }
+        walk.setDate(walk.getDate() + 7);
+      }
+    }
+
     var last7 = days.slice(-7);
     var last7Days = last7.filter(function (d) { return d.minutes > 0; }).length;
     var last7Minutes = last7.reduce(function (sum, d) { return sum + d.minutes; }, 0);
@@ -108,6 +148,39 @@
       { hours: 300, label: '300h', reached: totalHours >= 300 },
       { hours: 600, label: '600h', reached: totalHours >= 600 },
     ];
+
+    // Weekly minutes for the last 12 ISO weeks (oldest → newest).
+    var weekMin = {};
+    for (var wi = 0; wi < sessions.length; wi++) {
+      var wk0 = isoWeekKey(sessions[wi].date);
+      weekMin[wk0] = (weekMin[wk0] || 0) + (sessions[wi].duration_min || 0);
+    }
+    var weekly = [];
+    for (var w = 11; w >= 0; w--) {
+      var dW = new Date(today);
+      dW.setDate(dW.getDate() - w * 7);
+      var key = isoWeekKey(dW.toISOString().slice(0, 10));
+      weekly.push({ week: key, minutes: weekMin[key] || 0 });
+    }
+
+    // Pace + projection to the 600 h goal.
+    var dates = sessions.map(function (s) { return s.date; }).filter(Boolean).sort();
+    var firstDate = dates.length ? dates[0] : null;
+    var weeksSinceFirst = firstDate
+      ? Math.max(1, Math.ceil((today - new Date(firstDate)) / (7 * 86400000)))
+      : 1;
+    var weeksConsidered = Math.min(12, weeksSinceFirst);
+    var recentMin = weekly.reduce(function (a, x) { return a + x.minutes; }, 0);
+    var paceHoursPerWeek = (recentMin / 60) / weeksConsidered;
+    var eta = null;
+    if (paceHoursPerWeek > 0.01 && remainingHours > 0) {
+      var weeksToGoal = remainingHours / paceHoursPerWeek;
+      eta = {
+        weeks: weeksToGoal,
+        years: weeksToGoal / 52,
+        date: new Date(today.getTime() + weeksToGoal * 7 * 86400000).toISOString().slice(0, 10),
+      };
+    }
 
     return {
       totalCount: sessions.length,
@@ -122,6 +195,14 @@
       last7Days: last7Days,
       last7Minutes: last7Minutes,
       milestones: milestones,
+      weekly: weekly,
+      weekCount: weekCount,
+      longestStreak: longestStreak,
+      avgCalm: avgCalm,
+      avgFocus: avgFocus,
+      ratedCount: ratedCount,
+      paceHoursPerWeek: paceHoursPerWeek,
+      eta: eta,
     };
   }
 
@@ -162,7 +243,7 @@
 
     async patchSession(id, patch) {
       var ref = sessionsCol().doc(id);
-      var allowed = ['duration_min', 'variant', 'intention', 'note', 'rating_calm', 'rating_focus'];
+      var allowed = ['date', 'duration_min', 'variant', 'intention', 'note', 'rating_calm', 'rating_focus'];
       var update = {};
       for (var i = 0; i < allowed.length; i++) {
         var key = allowed[i];
@@ -183,6 +264,47 @@
     async getStats() {
       var sessions = await loadSessions();
       return computeStats(sessions);
+    },
+
+    // Live subscriptions (Firestore onSnapshot) — return an unsubscribe fn.
+    subscribeStats(cb) {
+      try {
+        return sessionsCol().onSnapshot(function (snap) {
+          var sessions = snap.docs.map(function (d) { var x = d.data(); x.id = d.id; return x; });
+          cb(computeStats(sessions));
+        }, function (e) { console.warn('subscribeStats failed:', e); });
+      } catch (e) { return function () {}; }
+    },
+
+    subscribeSessions(cb) {
+      try {
+        return sessionsCol().onSnapshot(function (snap) {
+          var sessions = snap.docs.map(function (d) { var x = d.data(); x.id = d.id; return x; });
+          sessions.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+          cb({ sessions: sessions });
+        }, function (e) { console.warn('subscribeSessions failed:', e); });
+      } catch (e) { return function () {}; }
+    },
+
+    // ---- Weekly plan (coach) -------------------------------------------------
+    // One doc per user at users/{uid}/meta/plan. Shape:
+    //   { weekStart:'YYYY-MM-DD', target:Int, items:[{id,day(0=Mon..6),time:'HH:MM',
+    //     duration:Int}], updatedAt:ISO }
+    async getPlan() {
+      try { var d = await planDoc().get(); return d.exists ? d.data() : null; }
+      catch (e) { return null; }
+    },
+
+    async setPlan(plan) {
+      await planDoc().set(plan, { merge: false });
+      return plan;
+    },
+
+    subscribePlan(cb) {
+      try {
+        return planDoc().onSnapshot(function (d) { cb(d.exists ? d.data() : null); },
+          function (e) { console.warn('subscribePlan failed:', e); });
+      } catch (e) { return function () {}; }
     },
 
     async exportAll() {
@@ -261,6 +383,14 @@
         console.warn('localStorage migration error:', e);
       }
     },
+  };
+
+  // Weekly-planner config (coach). One session type for meditation.
+  window.PLAN_CONFIG = {
+    calName: '600 Meditation',
+    prodId: '-//600//Coach//DE',
+    defaultTime: '07:00',
+    types: [{ key: 'meditation', label: 'Meditation', emoji: '🧘', duration: 20 }],
   };
 
   // Variant catalog, exposed for modules (unchanged).

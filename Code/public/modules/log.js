@@ -12,6 +12,11 @@ window.LogModule = (function () {
   let ratingCalm = null;
   let ratingFocus = null;
   let manualMinutes = 20;
+  let manualDate = '';
+
+  function todayISO() {
+    return new Date().toISOString().slice(0, 10);
+  }
 
   function render() {
     // Reset state on fresh render
@@ -19,6 +24,7 @@ window.LogModule = (function () {
     noteText = '';
     ratingCalm = null;
     ratingFocus = null;
+    manualDate = todayISO();
 
     const root = document.createElement('div');
     root.className = 'view view-center';
@@ -39,11 +45,16 @@ window.LogModule = (function () {
       head.innerHTML = `
         <h3>Manual entry</h3>
         <p class="muted" style="font-size:13px;">No active sit. Log one after the fact.</p>
-        <label style="display:block;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-dim);margin-top:14px;margin-bottom:6px;">Duration (minutes)</label>
-        <input type="number" id="manual-minutes" min="1" max="360" step="1" value="${manualMinutes}" />
+        <div class="manual-fields">
+          <label>Date<input type="date" id="manual-date" value="${manualDate}" max="${todayISO()}"></label>
+          <label>Minutes<input type="number" id="manual-minutes" min="1" max="360" step="1" value="${manualMinutes}"></label>
+        </div>
       `;
       head.querySelector('#manual-minutes').addEventListener('input', e => {
         manualMinutes = parseInt(e.target.value, 10) || 0;
+      });
+      head.querySelector('#manual-date').addEventListener('input', e => {
+        manualDate = e.target.value || todayISO();
       });
     }
     root.appendChild(head);
@@ -136,6 +147,7 @@ window.LogModule = (function () {
 
     try {
       await window.api.createSession({
+        date: pending ? undefined : manualDate, // back-date manual entries
         duration_min: duration,
         variant: selectedVariant,
         intention,

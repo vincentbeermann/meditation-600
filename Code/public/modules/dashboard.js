@@ -9,6 +9,8 @@
 //   - export/import/wipe
 
 window.DashboardModule = (function () {
+  let unsub = null;
+
   function render() {
     const root = document.createElement('div');
     root.className = 'view';
@@ -18,11 +20,21 @@ window.DashboardModule = (function () {
     placeholder.innerHTML = '<p class="muted">Loading...</p>';
     root.appendChild(placeholder);
 
-    window.api.getStats().then(stats => {
-      root.replaceChildren(...buildContent(stats));
-    }).catch(e => {
-      root.replaceChildren(errCard(e.message));
-    });
+    if (unsub) { unsub(); unsub = null; }
+    if (window.api.subscribeStats) {
+      // Live: re-render whenever Firestore data changes (any device).
+      unsub = window.api.subscribeStats(stats => {
+        checkMilestones(stats);
+        root.replaceChildren(...buildContent(stats));
+      });
+    } else {
+      window.api.getStats().then(stats => {
+        checkMilestones(stats);
+        root.replaceChildren(...buildContent(stats));
+      }).catch(e => {
+        root.replaceChildren(errCard(e.message));
+      });
+    }
 
     return root;
   }
@@ -57,6 +69,8 @@ window.DashboardModule = (function () {
     ringCard.appendChild(milestones);
     out.push(ringCard);
 
+    out.push(buildHeroCard());
+
     // ----- Stats summary -----
     const summary = document.createElement('div');
     summary.className = 'card';
@@ -87,6 +101,11 @@ window.DashboardModule = (function () {
       out.push(cal);
     }
 
+    // ----- Trend + goal projection -----
+    if (stats.totalCount > 0) {
+      out.push(buildTrendCard(stats));
+    }
+
     // ----- Variant breakdown -----
     const variantKeys = Object.keys(stats.variants);
     if (variantKeys.length > 0) {
@@ -105,8 +124,12 @@ window.DashboardModule = (function () {
         const row = document.createElement('div');
         row.className = 'variant-row';
         const pct = Math.max(2, Math.round((data.minutes / maxMinutes) * 100));
+        const stat = [];
+        if (data.avgCalm != null)  stat.push(`calm ${data.avgCalm.toFixed(1)}`);
+        if (data.avgFocus != null) stat.push(`focus ${data.avgFocus.toFixed(1)}`);
+        const statLine = stat.length ? `<span class="vstat">${stat.join(' · ')}</span>` : '';
         row.innerHTML = `
-          <div class="label">${v.label}</div>
+          <div class="label">${v.label}${statLine}</div>
           <div class="bar"><div class="bar-fill" style="width:${pct}%;"></div></div>
           <div class="num">${formatHours(data.minutes / 60)}</div>
         `;
@@ -117,12 +140,87 @@ window.DashboardModule = (function () {
     }
 
     // ----- Reminders (push) -----
+    var comp = buildCompetenceCard(stats);
+    if (comp) out.push(comp);
+
+    out.push(buildPlanCard(stats));
+
     out.push(buildRemindersCard());
+
+    // ----- Settings -----
+    out.push(buildSettingsCard());
 
     // ----- Data management -----
     out.push(buildDataCard());
 
     return out;
+  }
+
+  // Celebrate crossing a milestone exactly once. On a fresh device, seed the
+  // set with already-reached milestones so we don't celebrate retroactively.
+  function checkMilestones(stats) {
+    try {
+      const key = '600-celebrated';
+      const raw = localStorage.getItem(key);
+      const reached = stats.milestones.filter(m => m.reached).map(m => m.hours);
+      if (raw === null) {
+        localStorage.setItem(key, JSON.stringify(reached));
+        return;
+      }
+      const done = new Set(JSON.parse(raw));
+      let fresh = null;
+      for (const m of stats.milestones) {
+        if (m.reached && !done.has(m.hours)) { done.add(m.hours); fresh = m; }
+      }
+      if (fresh) {
+        localStorage.setItem(key, JSON.stringify([...done]));
+        if (window.showToast) window.showToast('🎉 ' + fresh.label + ' erreicht!');
+      }
+    } catch (e) {}
+  }
+
+  function buildTrendCard(stats) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<h3>Verlauf & Ziel</h3>';
+
+    const proj = document.createElement('p');
+    proj.className = 'muted';
+    proj.style.fontSize = '13px';
+    if (stats.eta) {
+      const pace = stats.paceHoursPerWeek;
+      const paceStr = pace >= 1 ? pace.toFixed(1) + ' h' : Math.round(pace * 60) + ' min';
+      let etaStr;
+      if (stats.eta.years >= 1.2) {
+        etaStr = '~' + stats.eta.years.toFixed(1) + ' Jahre';
+      } else {
+        etaStr = '~' + new Date(stats.eta.date).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+      }
+      proj.innerHTML = `Tempo: <strong style="color:var(--text);">${paceStr}/Woche</strong> · 600 h erreicht <strong style="color:var(--text);">${etaStr}</strong>`;
+    } else {
+      proj.textContent = 'Sitz ein paar Wochen, dann zeige ich dir die Hochrechnung aufs Ziel.';
+    }
+    card.appendChild(proj);
+
+    const max = Math.max(1, ...stats.weekly.map(w => w.minutes));
+    const chart = document.createElement('div');
+    chart.className = 'weekly-chart';
+    stats.weekly.forEach(w => {
+      const col = document.createElement('div');
+      col.className = 'weekly-col';
+      const h = Math.round((w.minutes / max) * 100);
+      col.innerHTML = `<div class="weekly-bar" style="height:${w.minutes > 0 ? Math.max(4, h) : 0}%;" title="${w.minutes} min"></div>`;
+      chart.appendChild(col);
+    });
+    card.appendChild(chart);
+
+    const cap = document.createElement('p');
+    cap.className = 'muted';
+    cap.style.cssText = 'font-size:11px;text-align:center;margin-top:6px;';
+    cap.textContent = 'Minuten/Woche · letzte 12 Wochen';
+    card.appendChild(cap);
+
+    return card;
   }
 
   function buildRemindersCard() {
@@ -271,6 +369,122 @@ window.DashboardModule = (function () {
     return `${Math.round(h)} h`;
   }
 
+  // Lower the activation energy: one tap to start, plus a "tiny version" for
+  // low-energy days (behavioral activation — a 2-min sit beats skipping).
+  function buildHeroCard() {
+    var card = document.createElement('div');
+    card.className = 'card hero-card';
+    var btn = document.createElement('button');
+    btn.className = 'hero-btn';
+    btn.textContent = 'Jetzt sitzen';
+    btn.addEventListener('click', function () { location.hash = '#timer'; });
+    card.appendChild(btn);
+    var mini = document.createElement('button');
+    mini.className = 'hero-mini';
+    mini.textContent = 'nur 2 Minuten';
+    mini.addEventListener('click', function () {
+      if (window.TimerModule && window.TimerModule.preset) window.TimerModule.preset(2);
+      location.hash = '#timer';
+    });
+    card.appendChild(mini);
+    return card;
+  }
+
+  // Competence + reflection feedback (SDT competence need). Robust comparisons
+  // only — stays silent when there isn't enough data to say something true.
+  function buildCompetenceCard(stats) {
+    if (!stats || !stats.weekly || stats.weekly.length < 2) return null;
+    var weekly = stats.weekly;
+    var cur = weekly[weekly.length - 1].minutes;
+    var prior = weekly.slice(0, -1).map(function (w) { return w.minutes; }).filter(function (m) { return m > 0; });
+    var lines = [];
+    if (prior.length >= 2) {
+      var avg = prior.reduce(function (a, b) { return a + b; }, 0) / prior.length;
+      var maxMin = Math.max.apply(null, weekly.map(function (w) { return w.minutes; }));
+      if (cur > 0 && cur === maxMin) {
+        lines.push('Diese Woche ' + cur + ' min — deine stärkste Woche bisher. 💪');
+      } else if (avg > 0 && cur >= avg) {
+        var pct = Math.round((cur - avg) / avg * 100);
+        lines.push('Diese Woche ' + cur + ' min — ' + pct + '% über deinem Schnitt.');
+      }
+      // Below average: stay silent — no discouraging comparison (mid-week it's unfair).
+    }
+    if (stats.ratedCount >= 4 && stats.avgCalm != null) {
+      lines.push('Ruhe Ø ' + stats.avgCalm.toFixed(1) + ' · Fokus Ø ' + stats.avgFocus.toFixed(1) + ' (' + stats.ratedCount + ' bewertet)');
+    }
+    if (!lines.length) return null;
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<h3>Diese Woche</h3>';
+    lines.forEach(function (t) {
+      var p = document.createElement('p');
+      p.className = 'comp-line';
+      p.textContent = t;
+      card.appendChild(p);
+    });
+    return card;
+  }
+
+  function buildPlanCard(stats) {
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<h3>Wochenplan</h3><p class="plan-line muted">Lädt…</p>';
+    var btn = document.createElement('button');
+    btn.className = 'secondary';
+    btn.textContent = 'Woche planen';
+    btn.addEventListener('click', function () { if (window.PlanModule) window.PlanModule.open(); });
+    card.appendChild(btn);
+    if (window.api.getPlan) {
+      window.api.getPlan().then(function (p) {
+        var line = card.querySelector('.plan-line');
+        if (!line) return;
+        var done = stats ? (stats.weekCount || 0) : 0;
+        if (p && Array.isArray(p.items) && p.items.length) {
+          var target = p.target || p.items.length;
+          line.classList.remove('muted');
+          line.textContent = 'Diese Woche ' + done + ' / ' + target;
+          var bar = document.createElement('div');
+          bar.className = 'plan-progress';
+          var fill = document.createElement('div');
+          fill.className = 'plan-progress-fill';
+          fill.style.width = (target ? Math.min(100, Math.round(done / target * 100)) : 0) + '%';
+          bar.appendChild(fill);
+          card.insertBefore(bar, btn);
+          if (stats && stats.longestStreak) {
+            var ins = document.createElement('p');
+            ins.className = 'plan-insight muted';
+            ins.textContent = 'Serie: ' + (stats.streak || 0) + ' Wo · längste: ' + stats.longestStreak + ' Wo';
+            card.insertBefore(ins, btn);
+          }
+        } else {
+          line.textContent = 'Noch kein Plan — leg deine Woche in 30 Sekunden fest.';
+          btn.textContent = 'Woche planen →';
+        }
+      }).catch(function () {});
+    }
+    return card;
+  }
+
+  function buildToggle(label, key, def) {
+    const row = document.createElement('label');
+    row.className = 'settings-row';
+    const on = window.Settings ? window.Settings.get(key, def) : def;
+    row.innerHTML = `<span>${label}</span><input type="checkbox" ${on ? 'checked' : ''}>`;
+    row.querySelector('input').addEventListener('change', e => {
+      if (window.Settings) window.Settings.set(key, e.target.checked);
+    });
+    return row;
+  }
+
+  function buildSettingsCard() {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<h3>Einstellungen</h3>';
+    card.appendChild(buildToggle('Glocken', 'sound', true));
+    card.appendChild(buildToggle('Vibration', 'vibrate', true));
+    return card;
+  }
+
   function buildDataCard() {
     const card = document.createElement('div');
     card.className = 'card';
@@ -340,5 +554,5 @@ window.DashboardModule = (function () {
     return c;
   }
 
-  return { render, reset: () => {} };
+  return { render, reset: () => { if (unsub) { unsub(); unsub = null; } } };
 })();

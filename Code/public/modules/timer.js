@@ -12,8 +12,10 @@
 window.TimerModule = (function () {
   let phase = 'setup';        // 'setup' | 'active' | 'done'
   let mode = 'countdown';     // 'countdown' | 'open'
-  let targetMinutes = 20;
+  // Remember the last-used length + interval so the dial defaults to your usual.
+  let targetMinutes = parseInt(localStorage.getItem('600-sit-min'), 10) || 20;
   let intention = '';
+  let intervalMin = parseInt(localStorage.getItem('600-interval'), 10) || 0;
 
   let state = null;
   // When running:
@@ -86,6 +88,27 @@ window.TimerModule = (function () {
     input.value = intention;
     input.addEventListener('input', e => { intention = e.target.value; });
     setup.appendChild(intWrap);
+
+    // Interval bell picker
+    const bellWrap = document.createElement('div');
+    bellWrap.className = 'interval-field';
+    bellWrap.innerHTML = `<label>Interval bell</label>`;
+    const seg = document.createElement('div');
+    seg.className = 'interval-seg';
+    [[0, 'Off'], [5, '5m'], [10, '10m'], [15, '15m']].forEach(([val, lbl]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = lbl;
+      b.classList.toggle('active', intervalMin === val);
+      b.addEventListener('click', () => {
+        intervalMin = val;
+        seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+      });
+      seg.appendChild(b);
+    });
+    bellWrap.appendChild(seg);
+    setup.appendChild(bellWrap);
 
     // Start button
     const startBtn = document.createElement('button');
@@ -187,6 +210,10 @@ window.TimerModule = (function () {
       const pt = eventPoint(e);
       targetMinutes = pointToMinutes(pt.x, pt.y);
       update();
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('touchend', onUp);
       e.preventDefault();
     }
     function onMove(e) {
@@ -196,7 +223,13 @@ window.TimerModule = (function () {
       update();
       e.preventDefault();
     }
-    function onUp() { dragging = false; }
+    function onUp() {
+      dragging = false;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchend', onUp);
+    }
 
     function eventPoint(e) {
       if (e.touches && e.touches.length) {
@@ -207,10 +240,6 @@ window.TimerModule = (function () {
 
     svg.addEventListener('mousedown',  onDown);
     svg.addEventListener('touchstart', onDown, { passive: false });
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchmove', onMove, { passive: false });
-    window.addEventListener('mouseup',   onUp);
-    window.addEventListener('touchend',  onUp);
 
     wrap.appendChild(svg);
 
@@ -230,6 +259,10 @@ window.TimerModule = (function () {
 
   function startSit() {
     phase = 'active';
+    try {
+      localStorage.setItem('600-sit-min', targetMinutes);
+      localStorage.setItem('600-interval', intervalMin);
+    } catch (e) {}
     const durationS = mode === 'countdown' ? targetMinutes * 60 : 0;
     state = {
       startMs: Date.now(),
@@ -239,8 +272,11 @@ window.TimerModule = (function () {
       pauseStartMs: null,
       pausedAccumMs: 0,
       lastSecond: -1,
+      intervalS: intervalMin * 60,
+      lastIntervalIdx: 0,
     };
     beep(528, 250); // start bell (also unlocks the audio context via ensureAudio)
+    vibrate(60);
     requestWakeLock(); // keep the screen awake so the end bell fires on time
     rerender();
     tickLoop();
@@ -332,8 +368,25 @@ window.TimerModule = (function () {
       state.lastSecond = secNow;
     }
 
+    // Interval bells (every intervalS seconds), skipping the very end of a
+    // countdown so it doesn't collide with the closing bell.
+    if (state.intervalS > 0) {
+      const idx = Math.floor(elapsedS() / state.intervalS);
+      if (idx > state.lastIntervalIdx) {
+        state.lastIntervalIdx = idx;
+        const nearEnd = state.durationS > 0 && elapsedS() >= state.durationS - 1.5;
+        if (!nearEnd) { beep(440, 160); vibrate(50); }
+      }
+    }
+
     updateDisplay();
     state.rafId = requestAnimationFrame(tickLoop);
+  }
+
+  // Haptic feedback for phones in silent mode; no-op where unsupported.
+  function vibrate(ms) {
+    if (window.Settings && !window.Settings.vibrateOn()) return;
+    try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {}
   }
 
   function pauseToggle() {
@@ -361,6 +414,7 @@ window.TimerModule = (function () {
     releaseWakeLock();
     // closing bell
     beep(528, 350);
+    vibrate(140);
     const totalMin = Math.max(1, Math.round(elapsedS() / 60));
     window.PENDING_LOG = {
       duration_min: totalMin,
@@ -414,6 +468,7 @@ window.TimerModule = (function () {
   }
 
   function beep(freq = 528, durationMs = 250) {
+    if (window.Settings && !window.Settings.soundOn()) return;
     try {
       ensureAudio();
       if (!audioCtx) return;
@@ -481,5 +536,10 @@ window.TimerModule = (function () {
     }
   }
 
-  return { render, reset };
+  return {
+    render: render,
+    reset: reset,
+    // Preset the setup screen to a given length (used by the dashboard hero).
+    preset: function (min) { phase = 'setup'; mode = 'countdown'; targetMinutes = min; },
+  };
 })();

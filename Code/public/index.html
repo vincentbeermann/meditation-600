@@ -24,7 +24,7 @@
   <main id="view"></main>
 
   <!-- Login gate: covers the app until the user signs in (cross-device sync). -->
-  <div id="auth-overlay">
+  <div id="auth-overlay" role="dialog" aria-modal="true" aria-label="Anmelden">
     <div class="auth-card">
       <div class="auth-logo">🧘</div>
       <h2>600</h2>
@@ -48,15 +48,28 @@
   <script src="firebase-config.js"></script>
   <script src="firebase-init.js"></script>
   <script src="messaging.js"></script>
+  <script src="settings.js"></script>
 
   <script src="storage.js"></script>
   <script src="modules/timer.js"></script>
   <script src="modules/log.js"></script>
   <script src="modules/history.js"></script>
   <script src="modules/dashboard.js"></script>
+  <script src="modules/plan.js"></script>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
+      // Auto-update: when a new service worker takes control (after a deploy),
+      // reload once so the latest version is shown without a manual relaunch.
+      // Guarded so the very first install (no prior controller) doesn't reload.
+      if (navigator.serviceWorker.controller) {
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshing) return;
+          refreshing = true;
+          location.reload();
+        });
+      }
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('sw.js').catch(err => {
           console.warn('SW registration failed:', err);
