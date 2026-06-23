@@ -66,6 +66,8 @@ window.addEventListener('hashchange', () => {
 window.bootApp = function () {
   window.__booted = true;
   navigate(currentRoute());
+  // Keep the push token alive (iOS tokens expire) — silent if not yet permitted.
+  if (window.Reminders && window.Reminders.refresh) window.Reminders.refresh();
 };
 
 // Lightweight toast for save confirmations
