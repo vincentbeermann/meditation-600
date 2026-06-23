@@ -56,17 +56,36 @@
 
     await storeToken(token);
 
-    // Foreground messages: the SW doesn't fire when the page is focused, so show
-    // a lightweight toast instead.
+    wireForeground(m);
+    return { ok: true, token: token };
+  }
+
+  // Foreground messages: the SW doesn't fire when the page is focused, so show a
+  // lightweight toast instead. Wired once.
+  var foregroundWired = false;
+  function wireForeground(m) {
+    if (foregroundWired) return;
     try {
       m.onMessage(function (payload) {
         var n = (payload && (payload.notification || payload.data)) || {};
         var msg = n.title ? (n.title + (n.body ? ' — ' + n.body : '')) : 'Reminder';
         if (window.showToast) window.showToast(msg);
       });
+      foregroundWired = true;
     } catch (e) { /* ignore */ }
+  }
 
-    return { ok: true, token: token };
+  // Silently re-register the token on every app load (when already permitted).
+  // iOS Web Push tokens expire/rotate; without this the token dies, the server
+  // prunes it, and reminders stop forever. getToken() refreshes it.
+  async function refresh() {
+    if (!SUPPORTED || Notification.permission !== 'granted') return;
+    var m = getMessaging();
+    if (!m) return;
+    try {
+      var token = await m.getToken({ vapidKey: window.VAPID_KEY });
+      if (token) { await storeToken(token); wireForeground(m); }
+    } catch (e) { console.warn('[push] refresh failed:', e); }
   }
 
   window.Reminders = {
@@ -75,5 +94,6 @@
       return ('Notification' in window) ? Notification.permission : 'unsupported';
     },
     enable: enable,
+    refresh: refresh,
   };
 })();
