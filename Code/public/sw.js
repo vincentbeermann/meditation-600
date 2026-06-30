@@ -3,7 +3,7 @@
 // next launch without a manual cache bump. Precache uses {cache:'reload'} so a
 // new version never caches a stale (max-age) copy.
 
-const CACHE_VERSION = 'meditation-600-firebase-v20';
+const CACHE_VERSION = 'meditation-600-firebase-v21';
 const APP_SHELL = [
   './',
   'index.html',

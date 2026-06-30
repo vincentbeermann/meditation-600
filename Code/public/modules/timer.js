@@ -275,7 +275,7 @@ window.TimerModule = (function () {
       intervalS: intervalMin * 60,
       lastIntervalIdx: 0,
     };
-    beep(528, 250); // start bell (also unlocks the audio context via ensureAudio)
+    beep(396, 250); // start bell (also unlocks the audio context via ensureAudio)
     vibrate(60);
     requestWakeLock(); // keep the screen awake so the end bell fires on time
     rerender();
@@ -413,7 +413,7 @@ window.TimerModule = (function () {
     cancelAnimationFrame(state.rafId);
     releaseWakeLock();
     // closing bell
-    beep(528, 350);
+    beep(396, 350); // end bell
     vibrate(140);
     const totalMin = Math.max(1, Math.round(elapsedS() / 60));
     window.PENDING_LOG = {
@@ -467,23 +467,39 @@ window.TimerModule = (function () {
     } catch (e) { /* AudioContext unsupported / blocked */ }
   }
 
-  function beep(freq = 528, durationMs = 250) {
+  // Singing-bowl bell (replaces the old sine "beep"). A struck bowl is a set of
+  // INHARMONIC partials (non-integer ratios) over a long, slow exponential decay,
+  // with a faint shimmer from partials beating against each other. durationMs
+  // scales the ring time so start/end bells linger and interval bells are shorter.
+  function beep(freq = 432, durationMs = 250) {
     if (window.Settings && !window.Settings.soundOn()) return;
     try {
       ensureAudio();
       if (!audioCtx) return;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.frequency.value = freq;
-      osc.type = 'sine';
       const now = audioCtx.currentTime;
-      // Gentle envelope: attack 20ms, decay over durationMs
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.22, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000);
-      osc.connect(gain).connect(audioCtx.destination);
-      osc.start(now);
-      osc.stop(now + durationMs / 1000 + 0.05);
+      const base = Math.max(2.5, (durationMs / 1000) * 18); // fundamental decay (s)
+      const partials = [
+        { ratio: 1.00, gain: 0.30, decay: base },
+        { ratio: 2.76, gain: 0.16, decay: base * 0.7 },
+        { ratio: 5.40, gain: 0.09, decay: base * 0.45 },
+        { ratio: 8.93, gain: 0.05, decay: base * 0.3 },
+      ];
+      const out = audioCtx.createGain();
+      out.gain.value = 0.6;
+      out.connect(audioCtx.destination);
+      partials.forEach((pt, i) => {
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq * pt.ratio;
+        osc.detune.value = i === 0 ? 0 : (i % 2 ? 4 : -4); // gentle beating
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(pt.gain, now + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + pt.decay);
+        osc.connect(g).connect(out);
+        osc.start(now);
+        osc.stop(now + pt.decay + 0.1);
+      });
     } catch (e) {
       // AudioContext can be blocked until user interaction; ignored.
     }
